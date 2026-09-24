@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="row mb-4">
+    <div class="col-md-12">
+        <div class="card p-3">
+            <div class="d-flex justify-content-between align-items-center">
+                <h4>Hardware Inventory</h4>
+                <span class="badge bg-primary fs-6">Total Stocks: {{ total_stocks }}</span>
+            </div>
+            <form method="GET" action="{{ url_for('dashboard') }}" class="row g-2 mt-2">
+                <div class="col-md-6">
+                    <input type="text" name="search" class="form-control" placeholder="Search items..." value="{{ search }}">
+                </div>
+                <div class="col-md-4">
+                    <select name="category" class="form-select">
+                        <option value="ALL">All Categories</option>
+                        {% for cat in categories %}
+                            <option value="{{ cat }}" {% if selected_category == cat %}selected{% endif %}>{{ cat }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-md-2">
+                    <button type="submit" class="btn btn-secondary w-100">Filter</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<div class="card p-3 mb-4">
+    <table class="table table-hover">
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Item Name</th>
+                <th>Category</th>
+                <th>Quantity</th>
+                <th>Unit Price</th>
+                <th>Status</th>
+                {% if session.role == 'USER' %}<th>Action</th>{% endif %}
+            </tr>
+        </thead>
+        <tbody>
+            {% for item in items %}
+            <tr>
+                <td>{{ item[0] }}</td>
+                <td>{{ item[1] }}</td>
+                <td>{{ item[2] }}</td>
+                <td>{{ item[3] }}</td>
+                <td>${{ item[4] }}</td>
+                <td><span class="badge bg-info">{{ item[5] }}</span></td>
+                {% if session.role == 'USER' %}
+                <td>
+                    <form method="POST" action="{{ url_for('borrow') }}" class="d-flex">
+                        <input type="hidden" name="item_id" value="{{ item[0] }}">
+                        <input type="number" name="quantity" value="1" min="1" max="{{ item[3] }}" class="form-control form-control-sm me-2" style="width: 70px;">
+                        <button type="submit" class="btn btn-primary btn-sm" {% if item[3] < 1 %}disabled{% endif %}>Borrow</button>
+                    </form>
+                </td>
+                {% endif %}
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+{% if session.role == 'ADMIN' %}
+<div class="row">
+    <div class="col-md-6">
+        <div class="card p-3">
+            <h5>Pending Borrow Requests</h5>
+            <form method="POST" action="{{ url_for('admin_borrow_action') }}">
+                {% for b in pending_borrows %}
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" name="loan_ids" value="{{ b[0] }}">
+                    <label class="form-check-label">{{ b[1] }} requested {{ b[4] }}x {{ b[2] }} ({{ b[3] }})</label>
+                </div>
+                {% else %}
+                <p class="text-muted">No pending borrows.</p>
+                {% endfor %}
+                {% if pending_borrows %}
+                <div class="mt-2">
+                    <button type="submit" name="action" value="approve" class="btn btn-success btn-sm">Approve</button>
+                    <button type="submit" name="action" value="reject" class="btn btn-danger btn-sm">Reject</button>
+                </div>
+                {% endif %}
+            </form>
+        </div>
+    </div>
+</div>
+{% endif %}
+{% endblock %}

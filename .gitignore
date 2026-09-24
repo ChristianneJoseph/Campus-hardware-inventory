@@ -1,0 +1,36 @@
+# Database Files
+hardware_inventory.db
+*.sqlite
+*.sqlite3
+*.db
+
+# Environment & Secrets
+.env
+.env.local
+.env.*.local
+
+# Virtual Environments
+.venv/
+venv/
+ENV/
+env/
+
+# Python Runtime & Caches
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Logging & Local Directories
+app_logging/
+*.log
+
+# Editor & IDE Settings
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS Generated Files
+.DS_Store
+Thumbs.db
