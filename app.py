@@ -1,32 +1,18 @@
+from flask import Flask, render_template, request, redirect, url_for, flash, session, send_file
+import sqlite3
 import os
-from functools import wraps
-from flask import Flask, render_template, request, redirect, url_for, session, flash
-from Laboratorysystem import AuthController, InventoryController
+from Laboratorysystem import setup_database_tables, AuthController, InventoryController, DATABASE_FILE
 
 app = Flask(__name__)
-app.secret_key = os.environ.get("SECRET_KEY", "exp7-secret-key-dev")
+app.secret_key = "lab_experiment_7_secret_key"
 
-def login_required(f):
-    @wraps(f)
-    def decorated_function(*args, **kwargs):
-        if "username" not in session:
-            flash("Please log in to access this page.", "warning")
-            return redirect(url_for("login"))
-        return f(*args, **kwargs)
-    return decorated_function
-
-def admin_required(f):
-    @wraps(f)
-    def decorated_function(*args, **kwargs):
-        if session.get("role") != "ADMIN":
-            flash("Administrator access required.", "danger")
-            return redirect(url_for("dashboard"))
-        return f(*args, **kwargs)
-    return decorated_function
+setup_database_tables()
 
 @app.route("/")
 def index():
-    return redirect(url_for("dashboard") if "username" in session else url_for("login"))
+    if "username" in session:
+        return redirect(url_for("dashboard"))
+    return redirect(url_for("login"))
 
 @app.route("/login", methods=["GET", "POST"])
 def login():
@@ -36,16 +22,14 @@ def login():
         
         ok, msg, role, is_locked, email = AuthController.login_user(username, password)
         if ok:
-            session.clear()
             session["username"] = username
             session["role"] = role
-            session["email"] = email
             flash(msg, "success")
             return redirect(url_for("dashboard"))
-        
-        flash(msg, "danger")
-        return render_template("login.html", locked=is_locked, locked_username=username)
-        
+        else:
+            flash(msg, "danger")
+            return render_template("login.html", locked=is_locked, locked_username=username if is_locked else None)
+            
     return render_template("login.html")
 
 @app.route("/register", methods=["GET", "POST"])
@@ -54,16 +38,15 @@ def register():
         username = request.form.get("username", "").strip()
         email = request.form.get("email", "").strip()
         password = request.form.get("password", "").strip()
-        role = request.form.get("role", "USER").strip().upper()
+        role = request.form.get("role", "USER").strip()
 
-        ok, msg = AuthController.register_user(username, email, password, role=role)
+        ok, msg = AuthController.register_user(username, email, password, role)
         flash(msg, "success" if ok else "danger")
         if ok:
             return redirect(url_for("login"))
-            
     return render_template("register.html")
 
-@app.route("/reset-request", methods=["GET", "POST"])
+@app.route("/reset_request", methods=["GET", "POST"])
 def reset_request():
     if request.method == "POST":
         username = request.form.get("username", "").strip()
@@ -79,88 +62,172 @@ def reset_request():
         flash(msg, "success" if ok else "danger")
         if ok:
             return redirect(url_for("login"))
-
     return render_template("reset.html")
 
 @app.route("/dashboard")
-@login_required
 def dashboard():
-    search = request.args.get("search", "").strip()
+    if "username" not in session:
+        return redirect(url_for("login"))
+
+    search = request.args.get("search", "")
     category = request.args.get("category", "ALL")
 
-    items = InventoryController.get_all_items(search_text=search, category=category)
+    items = InventoryController.get_all_items(search, category)
     categories = InventoryController.get_categories()
     
-    all_items = InventoryController.get_all_items(search_text="", category="ALL")
-    total_stocks = sum(item[3] for item in all_items)
+    all_items = InventoryController.get_all_items("", "ALL")
+    total_stocks = sum([item[3] for item in all_items])
 
-    active_loans, history, pending_returns, pending_borrows, pending_resets = [], [], [], [], []
+    active_loans = []
+    pending_borrows = []
+    pending_returns = []
 
     if session["role"] == "USER":
         active_loans = InventoryController.get_user_active_loans(session["username"])
-        history = InventoryController.get_user_loan_history(session["username"])
-    else:
-        pending_returns = InventoryController.get_pending_returns()
+    elif session["role"] == "ADMIN":
         pending_borrows = InventoryController.get_pending_borrows()
-        pending_resets = AuthController.get_pending_resets()
+        pending_returns = InventoryController.get_pending_returns()
 
     return render_template(
         "dashboard.html",
         items=items,
         categories=categories,
+        total_stocks=total_stocks,
         search=search,
         selected_category=category,
-        total_stocks=total_stocks,
         active_loans=active_loans,
-        history=history,
-        pending_returns=pending_returns,
         pending_borrows=pending_borrows,
-        pending_resets=pending_resets
+        pending_returns=pending_returns
     )
 
-@app.route("/borrow", methods=["POST"])
-@login_required
-def borrow():
-    try:
-        item_id = int(request.form["item_id"])
-        quantity = int(request.form.get("quantity", 1))
-    except (KeyError, ValueError):
-        flash("Invalid borrow parameters.", "danger")
+@app.route("/item/add", methods=["POST"])
+def add_item():
+    if session.get("role") != "ADMIN":
         return redirect(url_for("dashboard"))
 
-    if session["role"] != "USER":
-        flash("Only user accounts can submit borrow requests.", "danger")
+    asset_name = request.form.get("asset_name")
+    category = request.form.get("category")
+    stock_qty = int(request.form.get("stock_qty"))
+    unit_val = float(request.form.get("unit_val"))
+    status = InventoryController.evaluate_status(stock_qty)
+
+    try:
+        db_conn = sqlite3.connect(DATABASE_FILE)
+        cursor = db_conn.cursor()
+        cursor.execute(
+            "INSERT INTO equipment_inventory (asset_name, asset_category, stock_qty, unit_val, stock_status) VALUES (?, ?, ?, ?, ?)",
+            (asset_name, category, stock_qty, unit_val, status)
+        )
+        db_conn.commit()
+        db_conn.close()
+        flash("Item added successfully!", "success")
+    except sqlite3.IntegrityError:
+        flash("An item with this name already exists.", "danger")
+
+    return redirect(url_for("dashboard"))
+
+@app.route("/item/edit", methods=["POST"])
+def edit_item():
+    if session.get("role") != "ADMIN":
         return redirect(url_for("dashboard"))
+
+    asset_id = int(request.form.get("asset_id"))
+    asset_name = request.form.get("asset_name")
+    category = request.form.get("category")
+    stock_qty = int(request.form.get("stock_qty"))
+    unit_val = float(request.form.get("unit_val"))
+    status = InventoryController.evaluate_status(stock_qty)
+
+    db_conn = sqlite3.connect(DATABASE_FILE)
+    cursor = db_conn.cursor()
+    cursor.execute(
+        "UPDATE equipment_inventory SET asset_name=?, asset_category=?, stock_qty=?, unit_val=?, stock_status=? WHERE asset_id=?",
+        (asset_name, category, stock_qty, unit_val, status, asset_id)
+    )
+    db_conn.commit()
+    db_conn.close()
+    
+    flash("Item updated successfully!", "success")
+    return redirect(url_for("dashboard"))
+
+@app.route("/item/delete/<int:asset_id>", methods=["POST"])
+def delete_item(asset_id):
+    if session.get("role") != "ADMIN":
+        return redirect(url_for("dashboard"))
+
+    db_conn = sqlite3.connect(DATABASE_FILE)
+    cursor = db_conn.cursor()
+    cursor.execute("DELETE FROM equipment_inventory WHERE asset_id=?", (asset_id,))
+    db_conn.commit()
+    db_conn.close()
+
+    flash("Item deleted successfully!", "danger")
+    return redirect(url_for("dashboard"))
+
+@app.route("/borrow", methods=["POST"])
+def borrow():
+    if "username" not in session:
+        return redirect(url_for("login"))
+
+    item_id = int(request.form.get("item_id"))
+    quantity = int(request.form.get("quantity"))
 
     ok, msg = InventoryController.borrow_item(session["username"], item_id, quantity)
     flash(msg, "success" if ok else "danger")
     return redirect(url_for("dashboard"))
 
-@app.route("/return-request", methods=["POST"])
-@login_required
+@app.route("/return_request", methods=["POST"])
 def return_request():
-    raw_ids = request.form.getlist("loan_ids")
-    loan_ids = [int(x) for x in raw_ids if x.isdigit()]
-    
+    if "username" not in session:
+        return redirect(url_for("login"))
+
+    loan_ids = [int(id_) for id_ in request.form.getlist("loan_ids")]
     ok, msg = InventoryController.request_bulk_item_returns(loan_ids)
-    flash(msg, "success" if ok else "warning")
-    return redirect(url_for("dashboard"))
-
-@app.route("/admin/borrow-action", methods=["POST"])
-@admin_required
-def admin_borrow_action():
-    raw_ids = request.form.getlist("loan_ids")
-    loan_ids = [int(x) for x in raw_ids if x.isdigit()]
-    approve = request.form.get("action") == "approve"
-
-    ok, msg = InventoryController.process_bulk_borrows(loan_ids, approve=approve)
     flash(msg, "success" if ok else "danger")
     return redirect(url_for("dashboard"))
+
+@app.route("/admin/borrow_action", methods=["POST"])
+def admin_borrow_action():
+    if session.get("role") != "ADMIN":
+        return redirect(url_for("dashboard"))
+
+    loan_ids = [int(id_) for id_ in request.form.getlist("loan_ids")]
+    action = request.form.get("action")
+    approve = (action == "approve")
+
+    ok, msg = InventoryController.process_bulk_borrows(loan_ids, approve)
+    flash(msg, "success" if ok else "danger")
+    return redirect(url_for("dashboard"))
+
+@app.route("/admin/return_action", methods=["POST"])
+def admin_return_action():
+    if session.get("role") != "ADMIN":
+        return redirect(url_for("dashboard"))
+
+    loan_ids = [int(id_) for id_ in request.form.getlist("loan_ids")]
+    action = request.form.get("action")
+    approve = (action == "approve")
+
+    ok, msg = InventoryController.process_bulk_returns(loan_ids, approve)
+    flash(msg, "success" if ok else "danger")
+    return redirect(url_for("dashboard"))
+
+@app.route("/export")
+def export():
+    if "username" not in session:
+        return redirect(url_for("login"))
+
+    ok, filepath = InventoryController.export_to_csv()
+    if ok:
+        return send_file(filepath, as_attachment=True, download_name="inventory_report.csv")
+    else:
+        flash(f"Export failed: {filepath}", "danger")
+        return redirect(url_for("dashboard"))
 
 @app.route("/logout")
 def logout():
     session.clear()
-    flash("Successfully logged out.", "success")
+    flash("Logged out successfully.", "success")
     return redirect(url_for("login"))
 
 if __name__ == "__main__":
