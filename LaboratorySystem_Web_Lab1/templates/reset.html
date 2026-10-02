@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card auth-card">
+    <h2>Password Reset Request</h2>
+    <form action="{{ url_for('reset_request') }}" method="POST">
+        <label>Username</label>
+        <input type="text" name="username" required>
+        
+        <label>Registered Email</label>
+        <input type="email" name="email" required>
+        
+        <label>New Password</label>
+        <input type="password" name="new_password" required>
+        
+        <label>Confirm Password</label>
+        <input type="password" name="confirm_password" required>
+        
+        <button type="submit" class="btn btn-warning">Submit Reset Request</button>
+    </form>
+    <div class="auth-links">
+        <a href="{{ url_for('login') }}">Back to Login</a>
+    </div>
+</div>
+{% endblock %}

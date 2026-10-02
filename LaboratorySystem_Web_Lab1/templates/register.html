@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card auth-card">
+    <h2>Register</h2>
+    <form action="{{ url_for('register') }}" method="POST">
+        <label>Username</label>
+        <input type="text" name="username" required>
+        
+        <label>Email</label>
+        <input type="email" name="email" required>
+        
+        <label>Password</label>
+        <input type="password" name="password" required>
+        
+        <label>Account Role</label>
+        <select name="role">
+            <option value="USER">USER</option>
+            <option value="ADMIN">ADMIN</option>
+        </select>
+        
+        <button type="submit" class="btn btn-success">Register</button>
+    </form>
+    <div class="auth-links">
+        <a href="{{ url_for('login') }}">Back to Login</a>
+    </div>
+</div>
+{% endblock %}
